@@ -9,6 +9,4 @@ import java.util.List;
  * Created by Lauris on 22/08/2017.
  */
 public interface PageRepository extends CrudRepository<Page, Long> {
-
-    List<Page> findByChapterId(Long chapterId);
 }

@@ -5,6 +5,7 @@ package com.lbraka.sasebackend.controllers;
  */
 
 import com.lbraka.sasebackend.controllers.dto.ChapterContent;
+import com.lbraka.sasebackend.controllers.dto.ChapterTitle;
 import com.lbraka.sasebackend.model.Chapter;
 import com.lbraka.sasebackend.model.Page;
 import com.lbraka.sasebackend.repositories.ChapterRepository;
@@ -13,7 +14,10 @@ import com.lbraka.sasebackend.services.ChapterService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/chapters")
@@ -33,36 +37,24 @@ public class ChapterController {
 
     @RequestMapping(method = RequestMethod.POST)
     public Chapter newChapter(@RequestBody ChapterContent newChapter) {
-        newChapter.getChapter().setPages(chapterService.buildChapterPages(newChapter.getContent()));
-        Iterable<Page> save1 = pageRepository.save(newChapter.getChapter().getPages());
-        Chapter save = chapterRepo.save(newChapter.getChapter());
-        return save;
+        Chapter savedChapter = chapterService.createNewChapter(newChapter.getChapter(), newChapter.getContent(), lastChapter());
+        pageRepository.save(savedChapter.getPages());
+        return savedChapter;
     }
 
     @RequestMapping(method = RequestMethod.GET, value="{id}")
     public Chapter chapterById(@PathVariable Long id) {
-        Chapter chapter = this.chapterRepo.findOne(id);
-        if(chapter != null) {
-            chapter.getPages();
-        }
-        return chapter;
+        return this.chapterRepo.findOne(id);
     }
 
     @RequestMapping(method = RequestMethod.GET, path = "/last")
     public Chapter lastChapter() {
-        Iterable<Chapter> allChapters = this.chapterRepo.findAll();
-        if(allChapters != null) {
-            Iterator<Chapter> iterator = allChapters.iterator();
-            if(iterator.hasNext()) {
-                Chapter chapter = iterator.next();
-                Iterable<Page> allPages = pageRepository.findAll();
-                Iterator<Page> iterator1 = allPages.iterator();
-                while(iterator1.hasNext()) {
-                    chapter.getPages().add(iterator1.next());
-                }
-                return chapter;
-            }
-        }
-        return null;
+        return chapterRepo.findTop1ByOrderByIdDesc();
+    }
+
+    @RequestMapping(method = RequestMethod.GET, path = "/titles")
+    public List<ChapterTitle> chapterTitles() {
+        return chapterRepo.findChaptersTitle().stream()
+                .map(obj -> new ChapterTitle(obj[0].toString(), obj[1].toString())).collect(Collectors.toList());
     }
 }

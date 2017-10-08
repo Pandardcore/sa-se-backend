@@ -11,17 +11,17 @@ public class Page {
     @Id
     @GeneratedValue(strategy= GenerationType.AUTO)
     @Column(name = "page_id")
-    public Long id;
+    private Long id;
 
     @Column(name = "page_number")
-    public Integer pageNumber;
+    private Integer pageNumber;
 
     @Lob
     @Column(name = "page_content")
-    public String pageContent;
+    private String pageContent;
 
     @Column(name = "chapter_id")
-    public Long chapterId;
+    private Long chapterId;
 
     public Page() {
         this.pageContent = "";
@@ -48,5 +48,21 @@ public class Page {
 
     public Long getChapterId() {
         return chapterId;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public void setPageNumber(Integer pageNumber) {
+        this.pageNumber = pageNumber;
+    }
+
+    public void setPageContent(String pageContent) {
+        this.pageContent = pageContent;
+    }
+
+    public void setChapterId(Long chapterId) {
+        this.chapterId = chapterId;
     }
 }

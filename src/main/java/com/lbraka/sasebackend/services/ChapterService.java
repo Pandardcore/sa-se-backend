@@ -1,15 +1,15 @@
 package com.lbraka.sasebackend.services;
 
+import com.lbraka.sasebackend.model.Chapter;
 import com.lbraka.sasebackend.model.Page;
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
+import com.lbraka.sasebackend.repositories.ChapterRepository;
+import org.apache.commons.lang3.StringEscapeUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.StringJoiner;
 
 /**
  * Created by Lauris on 22/05/2017.
@@ -17,93 +17,202 @@ import java.util.stream.Collectors;
 @Service
 public class ChapterService {
 
-    private final int MAX_LINES_PER_PAGE = 35;
+    private final int MAX_LINES_PER_PAGE = 30;
+
+    private final int ABSOLUTE_MAX_CHAR_PER_LINES = 68;
 
     private final int MAX_CHAR_PER_LINES = 60;
 
-    public List<Page> buildChapterPages(String content) {
+    private final int MAX_EXTRA_WORD_LENGTH = 4;
+
+    @Autowired
+    private ChapterRepository chapterRepo;
+
+    public Chapter createNewChapter(Chapter newChapter, String chapterContent, Chapter previousChapter) {
+        Chapter savedChapter = chapterRepo.save(newChapter);
+        if(previousChapter != null) {
+            savedChapter.setPreviousChapterId(previousChapter.getId());
+            previousChapter.setNextChapterId(savedChapter.getId());
+
+        }
+        savedChapter.setPages(buildChapterPages(chapterContent, savedChapter.getId()));
+        return savedChapter;
+    }
+
+    public List<Page> buildChapterPages(String content, Long chapterId) {
         List<Page> pages = new ArrayList<>();
-        Elements paragraphs = Jsoup.parse(content).getElementsByTag("p");
-        Elements lines = new Elements();
-        int remainingLines = MAX_LINES_PER_PAGE;
-        for(Element paragraph : paragraphs) {
-            String textOfParagraph = paragraph.text();
-            int nbLinesInParagraph = (textOfParagraph.length() / MAX_CHAR_PER_LINES) + 1;
-            if(nbLinesInParagraph <= remainingLines) {
-                lines.add(paragraph);
-                remainingLines -= nbLinesInParagraph;
-            } else {
-                int maxCharactersAllowed = remainingLines * MAX_CHAR_PER_LINES;
-                String includedParagraph = "";
-                boolean isHtml = false;
-                boolean hasOpenTag = false;
-                char[] signs = paragraph.toString().toCharArray();
-                String currentTag = "";
-                int nbSignsIncluded = 0;
-                for(int i = 0; i < signs.length; ++i) {
-                    char currentSign = paragraph.toString().charAt(i);
-                    if(currentSign == '<' && String.valueOf(signs[i + 1]).matches("[a-z]")) {
-                        isHtml = true;
-                        hasOpenTag = true;
+        Integer currentNbLines = 0;
+        Integer currentLineSize = 0;
+        boolean isHtml;
+        boolean openedTag = false;
+        String currentTag = "";
+        StringJoiner currentLine = new StringJoiner(" ");
+        StringJoiner currentPageContent = new StringJoiner("<br />");
+        content = formatInputText(content);
+        String[] paragraphes = content.split("</p>");
+        for(String paragraph : paragraphes) {
+            String[] words = paragraph.replace("<p>", "")
+                    .replace("<p ", "<span ")
+                    .replace("</p>", "</span>")
+                    .concat("\n")
+                    .split(" ");
+            for(int i = 0; i < words.length; ++i) {
+                String currentWord = words[i];
+                if(currentWord.isEmpty()) continue;
+                isHtml = currentWord.startsWith("<");
+                if(isHtml) {
+                    while(!currentWord.endsWith(">")) {
+                        if(i + 1 < words.length) {
+                            currentWord = currentWord.concat(" ").concat(words[++i]);
+                        }
                     }
-                    if(isHtml && hasOpenTag) {
-                        currentTag = currentTag.concat(Character.toString(currentSign));
-                    }
-                    if(currentSign == '<' && String.valueOf(signs[i + 1]).matches("/")) {
-                        hasOpenTag = false;
-                    }
-                    includedParagraph = includedParagraph.concat(Character.toString(currentSign));
-                    if(!isHtml) {
-                        nbSignsIncluded++;
-                    }
-                    if(currentSign == '>') {
-                        isHtml = false;
-                    }
-                    if(nbSignsIncluded == maxCharactersAllowed) {
-                        break;
+                    if(!currentWord.startsWith("</") && !currentWord.endsWith("/>")) {
+                        openedTag = true;
+                        currentTag = currentWord;
+                    } else {
+                        openedTag = false;
+                        currentTag = "";
                     }
                 }
-
-                String remainingText = paragraph.toString().substring(includedParagraph.length());
-                if(!includedParagraph.endsWith(" ")) {
-                    remainingText = includedParagraph.substring(includedParagraph.lastIndexOf(" ") + 1).concat(remainingText);
-                    includedParagraph = includedParagraph.substring(0, includedParagraph.lastIndexOf(" "));
+                if(currentWord.contains("<img")) {
+                    // TODO correct img size
+                    String pageContent = currentPageContent.toString();
+                    if(openedTag) {
+                        int tagSize = currentTag.contains(" ") ? currentTag.indexOf(" ") : currentTag.lastIndexOf(">");
+                        pageContent = pageContent.concat("</").concat(currentTag.substring(1, tagSize));
+                        currentLine.add(currentTag);
+                    }
+                    if(!pageContent.isEmpty()) addNewPage(pageContent, pages, chapterId);
+                    currentPageContent = addNewPage(currentWord, pages, chapterId);
+                    currentNbLines = 0;
+                    continue;
                 }
-                if(hasOpenTag) {
-                    remainingText = currentTag.concat(remainingText);
+                if(currentLineSize + 1 <= MAX_CHAR_PER_LINES) {
+                    if(currentLineSize + getCurrentWordLength(currentWord) > ABSOLUTE_MAX_CHAR_PER_LINES) {
+                        currentLine = addNewLine(currentLine, currentPageContent);
+                        currentLineSize = 0;
+                        currentNbLines++;
+                    }
+                    addWordToLine(currentLine, currentWord);
+                    if(!isHtml) currentLineSize += getCurrentWordLength(currentWord);
+                    if (currentWord.endsWith("\n")) {
+                        currentLine = addNewLine(currentLine, currentPageContent);
+                        currentLineSize = 0;
+                        currentNbLines++;
+                    }
+                } else {
+                    if(wordHasPunctuation(currentWord)  && newWordFit(currentWord, currentLineSize)) {
+                        currentLine = addWordAndNewLine(currentLine, currentWord, currentPageContent);
+                        currentLineSize = 0;
+                        currentNbLines++;
+                    } else if(canAddNextWord(words, i+1, currentLineSize + getCurrentWordLength(currentWord))) {
+                        addWordToLine(currentLine, currentWord);
+                        currentLine = addWordAndNewLine(currentLine, words[++i], currentPageContent);
+                        currentLineSize = 0;
+                        currentNbLines++;
+                    } else if(i > 0 && wordHasPunctuation(words[i - 1])) {
+                        currentLine = addNewLine(currentLine, currentPageContent);
+                        currentLineSize = 0;
+                        currentNbLines++;
+                        i--;
+                    } else {
+                        currentLine = addNewLine(currentLine, currentPageContent);
+                        currentLineSize = 0;
+                        currentNbLines++;
+                        addWordToLine(currentLine, currentWord);
+                        if(!isHtml) currentLineSize += getCurrentWordLength(currentWord);
+                    }
                 }
-                if(!remainingText.startsWith("<p")) {
-                    remainingText = includedParagraph.substring(includedParagraph.indexOf("<"), includedParagraph.indexOf(">") + 1).concat(remainingText);
+                if(currentNbLines == MAX_LINES_PER_PAGE) {
+                    String pageContent = currentPageContent.toString();
+                    if(openedTag) {
+                        int tagSize = currentTag.contains(" ") ? currentTag.indexOf(" ") : currentTag.lastIndexOf(">");
+                        pageContent = pageContent.concat("</").concat(currentTag.substring(1, tagSize));
+                        currentLine.add(currentTag);
+                    }
+                    currentPageContent = addNewPage(pageContent, pages, chapterId);
+                    currentNbLines = 0;
                 }
-
-                lines.add(Jsoup.parse(includedParagraph).getElementsByTag("p").first());
-                lines = addNewPage(pages, lines, Jsoup.parse(remainingText).getElementsByTag("p").first());
-                remainingLines = lines.isEmpty() ? MAX_LINES_PER_PAGE : MAX_LINES_PER_PAGE - (lines.get(0).text().length() / MAX_CHAR_PER_LINES) + 1;
-            }
-            if(remainingLines == 0) {
-                lines = addNewPage(pages, lines, null);
-                remainingLines = MAX_LINES_PER_PAGE;
             }
         }
-        if(remainingLines != 0) {
-            addNewPage(pages, lines, null);
+        if(!currentLine.toString().isEmpty() || !currentPageContent.toString().isEmpty()) {
+            currentPageContent.add(currentLine.toString());
+            String pageContent = currentPageContent.toString();
+            if(openedTag) {
+                int tagSize = currentTag.contains(" ") ? currentTag.indexOf(" ") : currentTag.lastIndexOf(">");
+                pageContent = pageContent.concat("</").concat(currentTag.substring(1, tagSize)).concat(">");
+                currentLine.add(currentTag);
+            }
+            addNewPage(pageContent, pages, chapterId);
         }
         return pages;
     }
 
-    private Elements addNewPage(List<Page> pages, Elements lines, Element firstElement) {
-        pages.add(new Page(null, pages.size() + 1, lines.toString(), null));
-        lines = new Elements();
-        if(firstElement != null) {
-            lines.add(firstElement);
-        }
-        return lines;
+    private boolean newWordFit(String word, int lineLength) {
+        return lineLength + word.length() + 1 <= ABSOLUTE_MAX_CHAR_PER_LINES;
     }
 
-    private int countLengthOfHtml(String content) {
-        return Jsoup.parse(content).children().stream()
-                .map(child -> "<" + child.tagName() + " " + child.attributes().asList().stream().map(attr -> attr.toString()).collect(Collectors.joining(" ")) + ">")
-                .collect(Collectors.joining())
-                .length();
+    private void addWordToLine(StringJoiner line, String word) {
+        line.add(word);
+    }
+
+    private boolean wordHasPunctuation(String word) {
+        return word.endsWith("(.,;!?");
+    }
+    
+    private StringJoiner addWordAndNewLine(StringJoiner line, String word, StringJoiner pageContent) {
+        addWordToLine(line, word);
+        return addNewLine(line, pageContent);
+    }
+
+    private StringJoiner addNewLine(StringJoiner line, StringJoiner pageContent) {
+        String lineContent = line.toString();
+        if(lineContent.equals("\n")) {
+            lineContent = "";
+        }
+        pageContent.add(lineContent);
+        return new StringJoiner(" ");
+    }
+
+    private boolean canAddNextWord(String[] words, int cpt, int lineLenght) {
+        return cpt < words.length
+                && newWordFit(words[cpt], lineLenght)
+                && !words[cpt].equals("\n")
+                && (wordHasPunctuation(words[cpt])
+                    || words[cpt].length() <= MAX_EXTRA_WORD_LENGTH);
+    }
+
+    private StringJoiner addNewPage(String pageContent, List<Page> pages, Long chapterId) {
+        if(!pageContent.toString().replace(" ", "").replace("\n", "").replace("<br />", "").replace("<br/>", "").isEmpty()) {
+            pages.add(new Page(null, pages.size() + 1, formatPageContent(pageContent), chapterId));
+        }
+        return new StringJoiner("<br />");
+    }
+
+    private String formatPageContent(String pageContent) {
+        pageContent = pageContent.replace("?", " ?")
+                .replace("!", " !")
+                .replace("--", "-- ");
+        if(pageContent.startsWith("<br />")) {
+            pageContent.replaceFirst("<br />", "");
+        }
+        return pageContent;
+    }
+
+    private String formatInputText(String input) {
+        return StringEscapeUtils.unescapeHtml4(input
+                .replace("<br />", "")
+                .replace("<pre>", "<p>")
+                .replace("</pre>", "</p>")
+                .replaceAll("\n(?=\\S)", " \n ")
+                .replaceAll(">(?=\\S)", "> ")
+                .replaceAll("<(?<=\\S)", " <")
+                .replaceAll("(\\s\\?)", "?")
+                .replaceAll("(\\s!)", "!")
+                .replace("-- ", "--"));
+    }
+
+    private int getCurrentWordLength(String currentWord) {
+        return !currentWord.equals("\n") ? currentWord.length() + 1 : 0;
     }
 }
