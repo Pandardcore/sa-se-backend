@@ -75,7 +75,6 @@ public class ChapterService {
                     }
                 }
                 if(currentWord.contains("<img")) {
-                    // TODO correct img size
                     String pageContent = currentPageContent.toString();
                     if(openedTag) {
                         int tagSize = currentTag.contains(" ") ? currentTag.indexOf(" ") : currentTag.lastIndexOf(">");

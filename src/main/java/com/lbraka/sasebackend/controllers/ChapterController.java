@@ -49,7 +49,13 @@ public class ChapterController {
 
     @RequestMapping(method = RequestMethod.GET, path = "/last")
     public Chapter lastChapter() {
+        Chapter top1ByOrderByIdDesc = chapterRepo.findTop1ByOrderByIdDesc();
         return chapterRepo.findTop1ByOrderByIdDesc();
+    }
+
+    @RequestMapping(method = RequestMethod.GET, path = "/first")
+    public Chapter firstChapter() {
+        return chapterRepo.findTop1ByOrderByIdAsc();
     }
 
     @RequestMapping(method = RequestMethod.GET, path = "/titles")
